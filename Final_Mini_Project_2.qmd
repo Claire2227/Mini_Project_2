@@ -1,0 +1,183 @@
+---
+title: "Mini Project 2"
+subtitle: "Avery & Claire"
+format: typst
+editor: visual
+---
+
+# Libraries:
+
+```{r}
+library(tidyverse)
+library(rvest)
+library(stringr)
+library(httr)
+library(lubridate)
+```
+
+# Locations
+
+```{r}
+# We created a data frame, specifying our chosen cities, their coordinates, and climate type. To compare and contrast weather from around the world, we specifically chose these cities due to their differing climate types. 
+
+locations <- data.frame(
+  city = c("Singapore", "Mumbai", "Bangkok", "Cairo", "Phoenix", "Denver", "Rome", "London", "Sydney", "San Francisco", "Chicago", "Minneapolis", "Toronto", "Moscow", "Nuuk", "Longyearbyen"),
+  climate = c("Tropical", "Tropical", "Tropical", "Dry", "Dry", "Dry", "Temperate", "Temperate", "Temperate", "Temperate", "Continental", "Continental", "Continental", "Continental", "Polar", "Polar"),
+  latitude = c(1.2897, 19.0728, 13.754, 30.0626, 33.4484, 39.7392, 41.8919, 51.5085, -33.8678, 37.7749, 41.85, 44.98, 43.7064, 55.752, 64.1835, 78.2233),
+  longitude = c(103.8501, 72.8826, 100.5014, 31.2497, -112.074, -104.9847, 12.5113, -0.1257, 151.2073, -122.4194, -87.65, -93.2638, -79.3986, 37.6178, -51.7216, 15.6469)
+)
+
+```
+
+# API
+
+We got our data from [Open-Meteo](https://open-meteo.com/), and complied with their terms of gathering data from their website. We used their Free API which is for non-commercial use only with a limit of 10,000 requests per day. We only had 16 requests, so the data was collected ethically. We also put within our code the "Sys.sleep" function, which allows time for R to process these requests.
+
+```{r}
+# Identify the atomic vector type for each variable and set up empty tibble
+
+weather_data <- tibble(
+  City = character(),
+  Climate = character(),
+  Date = as.Date(character()),
+  temperature_2m_max = double(),
+  temperature_2m_min = double(),
+  wind_speed_10m_max = double(),
+  temperature_2m_mean = double(),
+  weather_code = double(),
+  precipitation_sum = double(),
+  rain_sum = double(),
+  snowfall_sum = double(),
+  daylight_duration = double()
+)
+
+# Create for loop, extracting weather data for each location in our data frame based on latitude and longitude values from Open-Meteo.com
+
+for(i in 1:nrow(locations)) {  
+
+  url <- str_c(
+    "https://archive-api.open-meteo.com/v1/archive?",
+    "latitude=", locations$latitude[i],
+    "&longitude=", locations$longitude[i],
+    "&start_date=2025-01-01",
+    "&end_date=2025-12-31",
+    "&daily=temperature_2m_max,temperature_2m_min,",
+    "wind_speed_10m_max,temperature_2m_mean,weather_code,",
+    "precipitation_sum,rain_sum,snowfall_sum,daylight_duration",
+    "&temperature_unit=fahrenheit",
+    "&wind_speed_unit=mph",
+    "&precipitation_unit=inch",
+    "&timezone=auto"
+  )
+
+  # Gives R time between API requests
+  Sys.sleep(0.5) 
+
+  # Retrieve url from open-meteo.com for each location, assign it to "one_city"
+  one_city <- GET(url)
+
+  # Extract and parse the API response into an R object
+  details <- content(one_city, "parsed")
+
+  # Accesses the daily weather information within the API response, and converts that information into a tibble
+  daily <- as_tibble(details$daily)
+
+  daily <- daily |>
+  mutate(
+    # Converts all of the columns from list to vectors
+    across(everything(), ~ unlist(.x)),
+    # Rename the 'time' column and convert to a date class variable
+    Date = as.Date(time),
+    # Accesses the city column in our original locations data frame
+    City = locations$city[i],
+    # Accesses the climates column in our original locations data frame
+    Climate = locations$climate[i]
+  ) |>
+  # Remove the old time column (that was not in date class)
+  select(-time)
+
+  # Collapses each locations rows of data together into one tibble
+  weather_data <- bind_rows(weather_data, daily)
+}
+
+# This is our final dataset. There are no missing values or anomolies present. We added a 'Month' variable to compare weather data between months using lubridate()
+weather_data <- weather_data |>
+  mutate(Month = month(Date, label = TRUE))
+
+```
+
+# CSV
+
+```{r}
+write_csv(weather_data, "weather_data.csv")
+```
+
+# Variable Definitions
+
+| Name           | Description
+|---------------------------------|-------------------------------------------|
+| `City` |  City from the world         |
+|---------------------------------|-------------------------------------------|
+| `Climate`         | 5 Climate Types (Tropical, Dry, Temperate, Continental, Arctic)  |
+|---------------------------------|-------------------------------------------|
+| `Date`      | A date from the year 2025 (Year, Month, Day)|
+|---------------------------------|-------------------------------------------|
+| `temperature_2m_max`   | Maximum daily temperature (Fahrenheit), measured 2 meters above the ground |
+|---------------------------------|-------------------------------------------|
+| `temperature_2m_min`   | Minimum daily temperature (Fahrenheit), measured 2 meters above the ground|
+|---------------------------------|-------------------------------------------|
+| `wind_speed_10`    | Wind speed in miles per hour (MPH), measured 10 meters above the ground|
+|---------------------------------|-------------------------------------------|
+| `temperature_2m_mean`    | Mean daily temperature (Fahrenheit), measured 2 meters above the ground |
+|---------------------------------|-------------------------------------------|
+| `weather_code`       | Numerical code corresponding to the daily weather condition (e.g., clear skies, rain, snow, or thunderstorms), based on WMO weather interpretation codes. |
+|---------------------------------|-------------------------------------------|
+| `precipitation_sum`     | Total amount of precipitation (including rain, showers, and snowfall) accumulated during a given day, measured in inches. |
+|---------------------------------|-------------------------------------------|
+| `rain_sum`    | Total amount of rainfall accumulated during a given day, measured in inches. |
+|---------------------------------|-------------------------------------------|
+| `snowfall_sum`    | Total amount of snowfall accumulated during a given day, measured in inches. |
+|---------------------------------|-------------------------------------------|
+| `daylight_duration`| Total number of seconds of daylight during a given day.|
+|---------------------------------|-------------------------------------------|
+| `Month`| Month of the date in Date column|   
+
+# Functions
+
+```{r}
+# Create a function called "avg_monthly_time" with inputs for city and month of user choice
+avg_monthly_temp <- function(city, month) {
+
+# Selects corresponding city and month rows. Then summarizes the average temperature for that month for each city based on daily average temperatures.
+weather_data |> 
+  filter(City == city, Month == month) |> 
+  group_by(City, Month) |> 
+  summarize(avg_monthly_temp = mean(temperature_2m_mean))
+  
+}
+
+#Testing function
+avg_monthly_temp("Nuuk", "Sep")
+
+# Create a function called "avg_monthly_temp_range" with inputs for city and month of user choice
+avg_monthly_temp_range <- function(city, month) {
+
+#Selects corresponding city and month rows. Then summarizes the average range of temperatures for that month for each city, based on daily temperature ranges.
+weather_data |> 
+  filter(City == city, Month == month) |> 
+  group_by(City, Month) |> 
+  summarize(
+    avg_monthly_temp_range = mean(temperature_2m_max - temperature_2m_min),
+# Removes grouping after summarizing so the result is an ungrouped tibble.
+    .groups = "drop")
+  
+}
+
+#Testing Function
+avg_monthly_temp_range("Nuuk", "Sep")
+  
+```
+
+# Reflection
+
+> We worked together the entire time on our project, so we mostly used one document and both collaborated on writing the code for that. We didn’t create branches or pull requests in GitHub because we created a lot of issues for ourselves trying to do that in the GitHub certification. We liked our method of working together because we talked through everything we did and it was a partner effort to come up with all the code we wrote. For the future, especially if we are not physically working on the project together the whole time, we could be brave and try creating pull requests and branches in GitHub. 
